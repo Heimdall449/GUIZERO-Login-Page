@@ -5,7 +5,7 @@ import re
 
 "configuration"
 
-CSV_FILE = "GUIZERO Login Page/users.csv"
+CSV_FILE = "GUIZERO-Login-Page/users.csv"
 
 # tkinter variable placeholders (will be initialized after `Tk()` exists)
 username_entry = None
