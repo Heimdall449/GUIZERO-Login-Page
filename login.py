@@ -141,13 +141,13 @@ def login():
 
     # Load password for found user and validate
     records = load_user_records()
-    found_username, found_password = records[idx]
+    found_username, found_password = records[idx] # Get the username and password from the records using the index found by binary search
     if password == found_password:
         error_text.set("")
-        if error_label:
+        if error_label: # Set error label color to green on successful login
             error_label.config(fg="green")
         open_success_window(username)
-    else:
+    else: # Password does not match
         error_text.set("Incorrect password")
         if error_label:
             error_label.config(fg="red")
@@ -169,12 +169,12 @@ error_fg = "red"
 # Build the UI
 Label(app, text="Username:").pack()
 Entry(app, textvariable=username_entry).pack()
-
+# The password entry field uses the `show="*"` option to mask the input, providing a more secure way for users to enter their passwords without displaying them on the screen.
 Label(app, text="Password:").pack()
 Entry(app, textvariable=password_entry, show="*").pack()
 
-Button(app, text="Log In", command=login).pack(pady=8)
-Button(app, text="Sign Up", command=open_signup).pack()
+Button(app, text="Log In", command=login).pack(pady=8) # Login button triggers the login function when clicked
+Button(app, text="Sign Up", command=open_signup).pack() # Sign Up button opens the signup page when clicked
 
 # Error message label
 error_text = StringVar()

@@ -98,17 +98,17 @@ def is_password_valid(username, password): # This function checks if the passwor
     Validate the password based on length, character requirements, and similarity to username.
     Returns an error message string if invalid, or None if valid.
     """
-    if len(password) < 8:
+    if len(password) < 8: # Check if the password is at least 8 characters long
         return "Password must be at least 8 characters long"
-    if " " in password:
+    if " " in password: # Check if the password contains spaces
         return "Password must not contain spaces"
-    if not any(char.isupper() for char in password):
+    if not any(char.isupper() for char in password): # Check if the password contains at least one uppercase letter
         return "Password must include an uppercase letter"
-    if not any(char.isdigit() for char in password):
+    if not any(char.isdigit() for char in password): # Check if the password contains at least one number
         return "Password must include a number"
-    if password == username:
+    if password == username: # Check if the password is the same as the username
         return "Password cannot be the same as username"
-    if is_password_similar(username, password):
+    if is_password_similar(username, password): # Check if the password is too similar to the username
         return "Password is too similar to the username"
     return None
 
@@ -121,8 +121,6 @@ def open_login():
     Launch the login page in a new Python process.
     """
     subprocess.Popen([sys.executable, LOGIN_PAGE])
-
-
 
 # -------------------------------------------------------------
 # Success window utility
