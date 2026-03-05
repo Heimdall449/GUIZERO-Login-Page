@@ -1,3 +1,9 @@
 -- UPD --
 1. Password change prompt added to login page
-2. User data displayed upon login no longer includes the user's password to ensure security.
+2. User data displayed upon login no longer includes the user's password to improve security.
+
+
+Related URLS:
+Testing Table - https://docs.google.com/spreadsheets/d/177AEKt3EMgPGiabfRiWO_tWGwCRc0pi8C2pulirxCXQ/edit?usp=sharing
+Software Development Portfolio Homepage - https://www.notion.so/UNIT-3-4-SOFTWARE-DEVELOPMENT-30075477774d80c289dcc46bf40fff26
+Github Repo - https://github.com/Heimdall449/GUIZERO-Login-Page
