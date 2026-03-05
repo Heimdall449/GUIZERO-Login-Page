@@ -14,6 +14,7 @@ import csv
 import os
 import subprocess
 import sys
+import difflib  # used for similarity checks between passwords
 
 # make sure parent directory (contains User.py) is importable
 _script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -24,10 +25,10 @@ if parent_dir not in sys.path:
 from User import User, is_password_valid
 
 
-"configuration"
+"configuration to define paths to CSV and signup page"
 
 # --- Configuration ---
-_csv_dir = os.path.dirname(os.path.abspath(__file__))
+_csv_dir = os.path.dirname(os.path.abspath(__file__)) # directory of this script
 CSV_FILE = os.path.join(_csv_dir, "users.csv")  # Path to user data CSV
 SIGNUP_PAGE = os.path.join(_csv_dir, "signup.py")  # Path to signup page
 
@@ -52,9 +53,9 @@ class UserRepository:
         if not os.path.exists(self.csv_path):
             return []
         records = []
-        with open(self.csv_path, newline="") as file:
-            reader = csv.DictReader(file)
-            for row in reader:
+        with open(self.csv_path, newline="") as file: # open the CSV file for reading
+            reader = csv.DictReader(file) # read CSV rows as dictionaries
+            for row in reader: # create User objects from CSV rows, using get() to avoid KeyErrors if fields are missing
                 user = User(
                     username=row.get("username", ""),
                     password=row.get("password", ""),
@@ -64,12 +65,12 @@ class UserRepository:
                     form=row.get("form", ""),
                     subjects=row.get("subjects", ""),
                 )
-                records.append(user)
+                records.append(user) # sort records by username for binary search
         records.sort(key=lambda u: u.username.lower())
         return records
     
     @staticmethod
-    def binary_search_usernames(usernames, target):
+    def binary_search_usernames(usernames, target): # helper method for binary search
         """
         Perform binary search on sorted list of usernames to find target username.
         Returns the index of target in usernames, or -1 when not found.
@@ -77,14 +78,14 @@ class UserRepository:
         Comparison is case-insensitive.
         """
         lo = 0
-        hi = len(usernames) - 1
+        hi = len(usernames) - 1 # binary search on the list of usernames
         target_l = target.lower()
         while lo <= hi:
             mid = (lo + hi) // 2
-            mid_val = usernames[mid].lower()
-            if mid_val == target_l:
-                return mid
-            elif mid_val < target_l:
+            mid_val = usernames[mid].lower() # case-insensitive comparison
+            if mid_val == target_l: # found the target username
+                return mid # return the index of the found username
+            elif mid_val < target_l: # target is after mid
                 lo = mid + 1
             else:
                 hi = mid - 1
@@ -100,11 +101,11 @@ class UserRepository:
     
     def find_user(self, username):
         """Find and return a User object by username, or None if not found."""
-        idx = self.find_user_index(username)
-        if idx == -1:
-            return None
+        idx = self.find_user_index(username) # find the index of the username using binary search
+        if idx == -1: 
+            return None # username not found
         records = self.load_records()
-        return records[idx]
+        return records[idx] # return the User object at the found index
 
 
 
@@ -112,83 +113,140 @@ class UserRepository:
 # Window classes for login UI
 # -------------------------------------------------------------
 class PasswordChangeWindow(Toplevel):
-    """Dialog window for changing a user's password."""
-    
-    def __init__(self, parent, user: User):
-        """
-        Initialize the password change dialog.
-        
-        Args:
-            parent: The parent tkinter window
-            user: The User object whose password will be changed
-        """
+    """Dialog used for resetting a forgotten/old password.  
+
+    This window is launched from the login screen (and optionally from the
+    success dialog) and asks the user to provide their username, email and
+    last-known password.  Only when the entered old-password has at least
+    60% similarity to the stored one is the "new password" field enabled.
+    After a successful change a small confirmation window allows the user to
+    return to the login page.
+    """
+
+    def __init__(self, parent):
         super().__init__(parent)
-        self.user = user
-        self.title("Change Password")
-        self.geometry("320x200")
-        
-        # New password label and entry
-        Label(self, text="New password:").pack()
+        self.title("Reset Password")
+        self.geometry("360x300")
+
+        # repository to look up users
+        self.repo = UserRepository(CSV_FILE)
+
+        # variables for all four entry fields
+        self.username_var = StringVar()
+        self.email_var = StringVar()
+        self.old_var = StringVar()
         self.new_var = StringVar()
-        Entry(self, textvariable=self.new_var, show="*").pack()
-        
-        # Confirm password label and entry
-        Label(self, text="Confirm password:").pack()
-        self.confirm_var = StringVar()
-        Entry(self, textvariable=self.confirm_var, show="*").pack()
-        
-        # Message label for feedback
         self.msg = StringVar()
-        Label(self, textvariable=self.msg, fg="red").pack(pady=5)
-        
-        # Submit button
-        Button(self, text="Submit", command=self.submit).pack(pady=5)
-    
-    def submit(self):
-        """Handle password change submission and validation."""
-        new = self.new_var.get().strip()
-        conf = self.confirm_var.get().strip()
-        
-        # Check if passwords match
-        if new != conf:
-            self.msg.set("Passwords do not match")
+
+        # build inputs
+        Label(self, text="Username:").pack()
+        Entry(self, textvariable=self.username_var).pack()
+
+        Label(self, text="Email:").pack()
+        Entry(self, textvariable=self.email_var).pack()
+
+        Label(self, text="Last known password:").pack()
+        Entry(self, textvariable=self.old_var, show="*").pack()
+
+        Label(self, text="New password:").pack()
+        self.new_entry = Entry(self, textvariable=self.new_var, show="*", state="disabled")
+        self.new_entry.pack()
+
+        Label(self, textvariable=self.msg, fg="red").pack(pady=5) # message label for feedback on similarity and validation
+        self.confirm_btn = Button(self, text="Confirm", command=self.confirm, state="disabled") # confirm button is disabled until similarity check passes
+        self.confirm_btn.pack(pady=5) # pack the confirm button below the message label
+
+        # update enabled state whenever username or old password changes
+        self.username_var.trace_add("write", lambda *args: self._check_similarity())
+        self.old_var.trace_add("write", lambda *args: self._check_similarity())
+
+    def _check_similarity(self):
+        # clear previous message
+        self.msg.set("")
+        uname = self.username_var.get().strip()
+        if not uname: # if username field is empty, disable new password input and show message
+            self.new_entry.config(state="disabled")
+            self.confirm_btn.config(state="disabled")
             return
-        
-        # Validate password
-        err = is_password_valid(self.user.username, new)
+        user = self.repo.find_user(uname)
+        if user is None: # if username not found, disable new password input and show message
+            self.msg.set("Username not found")
+            self.new_entry.config(state="disabled")
+            self.confirm_btn.config(state="disabled")
+            return
+        old_input = self.old_var.get()
+        if not old_input: # if old password field is empty, disable new password input
+            self.new_entry.config(state="disabled")
+            self.confirm_btn.config(state="disabled")
+            return
+        ratio = difflib.SequenceMatcher(None, old_input, user.password).ratio() # calculate similarity ratio
+        if ratio >= 0.6:
+            self.msg.set("Old password looks familiar – enter a new password")
+            self.new_entry.config(state="normal")
+            self.confirm_btn.config(state="normal")
+        else:
+            self.msg.set("Old password not similar enough")
+            self.new_entry.config(state="disabled")
+            self.confirm_btn.config(state="disabled")
+
+    def confirm(self):
+        uname = self.username_var.get().strip()
+        email = self.email_var.get().strip()
+        new_pw = self.new_var.get().strip()
+        user = self.repo.find_user(uname)
+        if user is None:
+            self.msg.set("Username not found")
+            return
+        if email.lower() != user.email.lower():
+            self.msg.set("Email does not match")
+            return
+        err = is_password_valid(uname, new_pw)
         if err:
             self.msg.set(err)
             return
-        
-        # Update password in CSV
-        self.user.change_password(new, CSV_FILE)
-        self.msg.set("Password updated")
+        user.change_password(new_pw, CSV_FILE)
+        SuccessResetWindow(self)
+
+
+class SuccessResetWindow(Toplevel):
+    """Simple confirmation dialog displayed after a password reset."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Success")
+        self.geometry("300x150")
+        Label(self, text="Password change successful!").pack(pady=10)
+        Button(self, text="Return to login", command=self._return).pack(pady=5)
+
+    def _return(self):
+        # close the reset window (parent of this) then this dialog
+        try:
+            self.master.destroy()
+        except Exception:
+            pass
+        self.destroy()
 
 
 class SuccessWindow(Toplevel):
     """Dialog window displayed after successful login."""
     
     def __init__(self, parent, user: User):
-        """
-        Initialize the success window with user data.
-        
-        Args:
-            parent: The parent tkinter window
-            user: The User object whose data will be displayed
-        """
         super().__init__(parent)
         self.user = user
         self.title("User Data")
         self.geometry("400x300")
         
         Label(self, text="Login Successful", font=("Arial", 14)).pack(pady=5)
-        Label(self, text=user.display_data(), justify=LEFT).pack(pady=10)
+        # Display user data without the password
+        user_info = user.display_data().replace(f"Password: {user.password}\n", "")
+        Label(self, text=user_info, justify=LEFT).pack(pady=10)
+        # allow the user to re‑open the reset form if they wish
         Button(self, text="Change Password", command=self._open_password_change).pack(pady=5)
         Button(self, text="OK", command=self.destroy).pack(pady=5)
     
     def _open_password_change(self):
-        """Open the password change dialog."""
-        PasswordChangeWindow(self, self.user)
+        """Open the password reset dialog (same as from login page)."""
+        PasswordChangeWindow(self)
 
 
 class LoginWindow(Tk):
@@ -224,6 +282,9 @@ class LoginWindow(Tk):
         
         Label(self, text="Password:").pack()
         Entry(self, textvariable=self.password_entry, show="*").pack()
+
+        # new password reset button sits under the password box
+        Button(self, text="Change Password", command=self.open_password_reset).pack(pady=2)
         
         Button(self, text="Log In", command=self.login).pack(pady=8)
         Button(self, text="Sign Up", command=self.open_signup).pack()
@@ -259,6 +320,10 @@ class LoginWindow(Tk):
     def open_signup(self):
         """Launch the signup page in a new Python process."""
         subprocess.Popen([sys.executable, self.signup_page])
+
+    def open_password_reset(self):
+        """Show the password reset dialog from the login screen."""
+        PasswordChangeWindow(self)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,3 @@
+-- UPD --
+1. Password change prompt added to login page
+2. User data displayed upon login no longer includes the user's password to ensure security.

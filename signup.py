@@ -36,9 +36,9 @@ from User import (
 "configuration"
 
 # --- Configuration ---
-_script_dir = os.path.dirname(os.path.abspath(__file__))
-CSV_FILE = os.path.join(_script_dir, "users.csv")
-LOGIN_PAGE = os.path.join(_script_dir, "login.py")
+_script_dir = os.path.dirname(os.path.abspath(__file__)) # directory of this script
+CSV_FILE = os.path.join(_script_dir, "users.csv") # Path to user data CSV
+LOGIN_PAGE = os.path.join(_script_dir, "login.py") # Path to login page script
 
 
 "repository and utility classes"
@@ -74,10 +74,10 @@ class UserRepository:
             subjects: User's subjects (comma-separated)
         """
         records = []
-        if os.path.exists(self.csv_path):
-            with open(self.csv_path, newline='', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
+        if os.path.exists(self.csv_path): # read existing records if file exists
+            with open(self.csv_path, newline='', encoding='utf-8') as f: # open the CSV file for reading
+                reader = csv.DictReader(f) # read CSV rows as dictionaries
+                for row in reader: # append each existing row to records list
                     records.append(row)
         
         new = {
@@ -89,8 +89,8 @@ class UserRepository:
             'form': form,
             'subjects': subjects,
         }
-        records.append(new)
-        records.sort(key=lambda r: (r.get('username') or '').lower())
+        records.append(new) # add new user record to list
+        records.sort(key=lambda r: (r.get('username') or '').lower()) # sort records by username, handling missing keys
         
         with open(self.csv_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
