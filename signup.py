@@ -12,248 +12,248 @@
 from tkinter import *
 import csv
 import os
-import re
 import subprocess
 import sys
+
+# allow importing User utilities located in parent workspace
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(_script_dir)
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
+
+from User import (
+    FIELDNAMES,
+    is_email_valid,
+    is_name_valid,
+    is_age_valid,
+    is_form_valid,
+    is_subjects_valid,
+    is_username_valid,
+    is_password_valid,
+)
 
 
 "configuration"
 
 # --- Configuration ---
-_script_dir = os.path.dirname(os.path.abspath(__file__)) # Directory of the current script
-CSV_FILE = os.path.join(_script_dir, "users.csv")  # Path to user data CSV
-LOGIN_PAGE = os.path.join(_script_dir, "login.py")  # Path to login page
-
-# tkinter variable placeholders (will be initialized after `Tk()` exists) - at the end of the file, after the main Tk root is created, we will set these to StringVar() instances that can be used in the GUI
-
-# Tkinter variable placeholders (initialized after Tk() exists) - in other words, these are just None for now and will be set to StringVar() after the main Tk root is created
-username_entry = None
-password_entry = None
-confirm_entry = None
-error_text = None
-error_label = None
-error_fg = "red"
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+CSV_FILE = os.path.join(_script_dir, "users.csv")
+LOGIN_PAGE = os.path.join(_script_dir, "login.py")
 
 
-"utility functions" # these are the functions that handle the core logic of the signup process, such as loading user data, validating input, and managing the CSV file. They are defined before the main GUI code to keep the structure organized and maintainable.
+"repository and utility classes"
 
 # -------------------------------------------------------------
-# File creation utility
+# User data repository for signup
 # -------------------------------------------------------------
-def create_csv_if_missing():
-    """
-    Create the CSV file with headers if it doesn't exist.
-    Ensures file handling logic is robust.
-    """
-    if not os.path.exists(CSV_FILE): # Check if the CSV file exists
-        with open(CSV_FILE, "w", newline="") as file:
-            writer = csv.writer(file)
-            writer.writerow(["username", "password"]) # Write the header row to the CSV file
+class UserRepository:
+    """Handles saving and managing user records in CSV."""
+    
+    def __init__(self, csv_path):
+        """Initialize repository with path to CSV file."""
+        self.csv_path = csv_path
+    
+    def create_csv_if_missing(self):
+        """Create CSV with header if it doesn't exist."""
+        if not os.path.exists(self.csv_path):
+            with open(self.csv_path, "w", newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+                writer.writeheader()
+    
+    def save_user(self, username, password, name='', age='', email='', form='', subjects=''):
+        """
+        Append new user then rewrite CSV sorted by username.
+        
+        Args:
+            username: User's username
+            password: User's password
+            name: User's name
+            age: User's age
+            email: User's email
+            form: User's form/grade
+            subjects: User's subjects (comma-separated)
+        """
+        records = []
+        if os.path.exists(self.csv_path):
+            with open(self.csv_path, newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    records.append(row)
+        
+        new = {
+            'username': username,
+            'password': password,
+            'name': name,
+            'age': age,
+            'email': email,
+            'form': form,
+            'subjects': subjects,
+        }
+        records.append(new)
+        records.sort(key=lambda r: (r.get('username') or '').lower())
+        
+        with open(self.csv_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+            writer.writeheader()
+            writer.writerows(records)
 
 
-# -------------------------------------------------------------
-# Username validation utilities
-# -------------------------------------------------------------
-def username_exists(username):
-    """
-    Check if the username already exists in the CSV file.
-    Returns True if found, False otherwise.
-    Handles missing file gracefully.
-    """
-    if not os.path.exists(CSV_FILE):
-        return False
-    with open(CSV_FILE, newline="") as file:
-        reader = csv.DictReader(file)
-        return any(row.get("username") == username for row in reader)
-
-def is_username_valid(username):
-    """
-    Validate the username based on length, allowed characters, and uniqueness.
-    Returns an error message string if invalid, or None if valid.
-    """
-    if not 5 <= len(username) <= 20:
-        return "Username must be 5–20 characters long"
-    if not re.match(r"^\w+$", username):
-        return "Username can only contain letters, numbers, and underscores"
-    if username_exists(username):
-        return "Username already exists"
-    return None
-
-
-# -------------------------------------------------------------
-# Password validation utilities
-# -------------------------------------------------------------
-def is_password_similar(username, password):
-    """
-    Check if the password is too similar to the username (70% or more overlap or username contained in password).
-    Returns True if too similar, False otherwise.
-    """
-    username_set = set(username.lower()) # Convert username to lowercase and create a set of unique characters
-    password_set = set(password.lower()) # Convert password to lowercase and create a set of unique characters
-    overlap = username_set & password_set # Find the intersection of characters between username and password
-    return len(overlap) / len(username_set) >= 0.7 or username.lower() in password.lower() # Check if the overlap is 70% or more, or if the username is contained in the password
-
-def is_password_valid(username, password): # This function checks if the password meets the specified criteria, including length, character requirements, and similarity to the username. It returns an error message if the password is invalid, or None if it is valid.
-    """
-    Validate the password based on length, character requirements, and similarity to username.
-    Returns an error message string if invalid, or None if valid.
-    """
-    if len(password) < 8: # Check if the password is at least 8 characters long
-        return "Password must be at least 8 characters long"
-    if " " in password: # Check if the password contains spaces
-        return "Password must not contain spaces"
-    if not any(char.isupper() for char in password): # Check if the password contains at least one uppercase letter
-        return "Password must include an uppercase letter"
-    if not any(char.isdigit() for char in password): # Check if the password contains at least one number
-        return "Password must include a number"
-    if password == username: # Check if the password is the same as the username
-        return "Password cannot be the same as username"
-    if is_password_similar(username, password): # Check if the password is too similar to the username
-        return "Password is too similar to the username"
-    return None
-
+"window classes"
 
 # -------------------------------------------------------------
-# GUI navigation utility
+# Window classes for signup UI
 # -------------------------------------------------------------
-def open_login():
-    """
-    Launch the login page in a new Python process.
-    """
-    subprocess.Popen([sys.executable, LOGIN_PAGE])
-
-# -------------------------------------------------------------
-# Success window utility
-# -------------------------------------------------------------
-def open_success_window():
-    """
-    Open a new window to show signup success message.
-    """
-    success_window = Toplevel(app)
-    success_window.title("Success")
-    success_window.geometry("300x150")
-    Label(success_window, text="Signup Successful!", font=("Arial", 14)).pack(expand=True)
-    Button(success_window, text="OK", command=success_window.destroy).pack(pady=10)
+class SuccessWindow(Toplevel):
+    """Dialog window displayed after successful signup."""
+    
+    def __init__(self, parent):
+        """
+        Initialize the success window.
+        
+        Args:
+            parent: The parent tkinter window
+        """
+        super().__init__(parent)
+        self.title("Success")
+        self.geometry("300x120")
+        Label(self, text="Signup Successful!", font=("Arial", 14)).pack(expand=True)
+        Button(self, text="OK", command=self.destroy).pack(pady=8)
 
 
-# -------------------------------------------------------------
-# User management: sorted insertion and file rewrite
-# -------------------------------------------------------------
-def save_user(username, password):
-    """
-    Save the new user to the CSV file.
-    Reads all existing records, inserts the new user, sorts alphabetically (case-insensitive),
-    and rewrites the file with the updated sorted data.
-    Uses insertion sort for clarity and maintainability.
-    """
-    # Read existing records
-    records = []
-    if os.path.exists(CSV_FILE):
-        with open(CSV_FILE, newline="") as file:
-            reader = csv.DictReader(file)
-            records = [(row.get("username", ""), row.get("password", "")) for row in reader]
+class SignupWindow(Tk):
+    """Main signup window with form validation."""
+    
+    def __init__(self, csv_file=CSV_FILE, login_page=LOGIN_PAGE):
+        """
+        Initialize the signup window.
+        
+        Args:
+            csv_file: Path to the users CSV file
+            login_page: Path to the login.py script
+        """
+        super().__init__()
+        self.csv_file = csv_file
+        self.login_page = login_page
+        self.repository = UserRepository(csv_file)
+        self.repository.create_csv_if_missing()
+        
+        self.title("Signup Page")
+        self.geometry("800x300")
+        
+        # Create tkinter variables
+        self.username_entry = StringVar()
+        self.name_entry = StringVar()
+        self.age_entry = StringVar()
+        self.email_entry = StringVar()
+        self.form_entry = StringVar()
+        self.subjects_entry = StringVar()
+        self.password_entry = StringVar()
+        self.confirm_entry = StringVar()
+        self.error_text = StringVar()
+        
+        self._build_ui()
+    
+    def _build_ui(self):
+        """Construct the signup UI."""
+        Label(self, text="Username:").pack()
+        Entry(self, textvariable=self.username_entry).pack()
+        
+        Label(self, text="Name:").pack()
+        Entry(self, textvariable=self.name_entry).pack()
+        
+        Label(self, text="Email:").pack()
+        Entry(self, textvariable=self.email_entry).pack()
+        
+        Label(self, text="Age:").pack()
+        Entry(self, textvariable=self.age_entry).pack()
+        
+        Label(self, text="Form:").pack()
+        Entry(self, textvariable=self.form_entry).pack()
+        
+        Label(self, text="Subjects (comma-separated):").pack()
+        Entry(self, textvariable=self.subjects_entry).pack()
+        
+        Label(self, text="Password:").pack()
+        Entry(self, textvariable=self.password_entry, show="*").pack()
+        
+        Label(self, text="Confirm Password:").pack()
+        Entry(self, textvariable=self.confirm_entry, show="*").pack()
+        
+        Button(self, text="Sign Up", command=self.signup).pack()
+        Button(self, text="Log In", command=self.open_login).pack()
+        
+        # Error message label
+        self.error_label = Label(self, textvariable=self.error_text, fg="red")
+        self.error_label.pack()
+    
+    def signup(self):
+        """Handle signup: validate fields and save new user."""
+        self.error_text.set("")
+        self.error_label.config(fg="red")
+        
+        username = self.username_entry.get().strip()
+        name_val = self.name_entry.get().strip()
+        age_val = self.age_entry.get().strip()
+        email = self.email_entry.get().strip()
+        form_val = self.form_entry.get().strip()
+        subjects_val = self.subjects_entry.get().strip()
+        password = self.password_entry.get().strip()
+        confirm = self.confirm_entry.get().strip()
+        
+        # Validate username
+        username_error = is_username_valid(username)
+        if username_error:
+            self.error_text.set(username_error)
+            return
+        
+        # Validate name
+        if not is_name_valid(name_val):
+            self.error_text.set("Name can only contain letters and spaces")
+            return
+        
+        # Validate age
+        if not is_age_valid(age_val):
+            self.error_text.set("Age must be a positive integer less than 150")
+            return
+        
+        # Validate email
+        if not is_email_valid(email):
+            self.error_text.set("Invalid email format")
+            return
+        
+        # Validate form
+        if not is_form_valid(form_val):
+            self.error_text.set("Form must be e.g. 12A or 9")
+            return
+        
+        # Validate subjects
+        if not is_subjects_valid(subjects_val):
+            self.error_text.set("Subjects must be comma-separated words")
+            return
+        
+        # Check passwords match
+        if password != confirm:
+            self.error_text.set("Passwords do not match")
+            return
+        
+        # Validate password
+        pw_err = is_password_valid(username, password)
+        if pw_err:
+            self.error_text.set(pw_err)
+            return
+        
+        # Save user
+        self.repository.save_user(username, password, name_val, age_val, email, form_val, subjects_val)
+        self.error_text.set("Signup successful!")
+        self.error_label.config(fg="green")
+        SuccessWindow(self)
+    
+    def open_login(self):
+        """Launch the login page in a new Python process."""
+        subprocess.Popen([sys.executable, self.login_page])
 
-    # Insert new record
-    records.append((username, password))
 
-    # Insertion sort (case-insensitive by username)
-    for i in range(1, len(records)):
-        key_item = records[i]
-        j = i - 1
-        while j >= 0 and records[j][0].lower() > key_item[0].lower():
-            records[j + 1] = records[j]
-            j -= 1
-        records[j + 1] = key_item
+if __name__ == "__main__":
+    app = SignupWindow()
+    app.mainloop()
 
-    # Rewrite file with header and sorted records
-    with open(CSV_FILE, "w", newline="") as file:
-        writer = csv.writer(file)
-        writer.writerow(["username", "password"])
-        for u, p in records:
-            writer.writerow([u, p])
-
-
-# -------------------------------------------------------------
-# GUI signup handler
-# -------------------------------------------------------------
-def signup():
-    """
-    Handle the signup process when the user clicks the signup button.
-    Validates username and password, checks for matching passwords,
-    inserts the new user in sorted order, and rewrites the CSV.
-    Provides meaningful error messages for all validation failures.
-    """
-    # Clear previous error messages and reset color
-    error_text.set("")
-    if error_label:
-        error_label.config(fg=error_fg)
-
-    # Read values from tkinter variables
-    username = username_entry.get().strip()
-    password = password_entry.get().strip()
-    confirm = confirm_entry.get().strip()
-
-    # Basic validations
-    username_error = is_username_valid(username)
-    if username_error:
-        error_text.set(username_error)
-        if error_label:
-            error_label.config(fg="red")
-        return
-
-    if password != confirm: # Check if password and confirm password match
-        error_text.set("Passwords do not match")
-        if error_label:
-            error_label.config(fg="red")
-        return
-
-    password_error = is_password_valid(username, password) # Validate password with respect to username and criteria
-    if password_error:
-        error_text.set(password_error)
-        if error_label:
-            error_label.config(fg="red")
-        return
-
-    save_user(username, password) # Save the new user to the CSV file (in sorted order)
-    error_text.set("Signup successful!")
-    if error_label:
-        error_label.config(fg="green")
-
-    open_success_window()
-
-
-# -------------------------------------------------------------
-# Main program app interface (Tkinter GUI setup)
-# -------------------------------------------------------------
-create_csv_if_missing()  # Ensure the CSV file exists before starting the app
-
-app = Tk()
-app.title("Signup Page")
-app.geometry("800x300")
-
-# Create tkinter variables AFTER the main Tk root exists
-username_entry = StringVar()
-password_entry = StringVar()
-confirm_entry = StringVar()
-error_fg = "red"
-
-# Build the UI using Label (not Text) for labels
-Label(app, text="Username:").pack()
-Entry(app, textvariable=username_entry).pack()
-
-Label(app, text="Password:").pack()
-Entry(app, textvariable=password_entry, show="*").pack()
-
-Label(app, text="Confirm Password:").pack()
-Entry(app, textvariable=confirm_entry, show="*").pack()
-
-Button(app, text="Sign Up", command=signup).pack()
-Button(app, text="Log In", command=open_login).pack()
-
-# Label bound to `error_text`; we'll adjust its fg in `signup()` as needed
-error_text = StringVar()  # Initialize the error_text variable
-error_label = Label(app, textvariable=error_text, fg=error_fg)
-error_label.pack()
-
-# Start the GUI event loop
-app.mainloop()

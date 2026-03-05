@@ -15,171 +15,252 @@ import os
 import subprocess
 import sys
 
+# make sure parent directory (contains User.py) is importable
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(_script_dir)
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
+
+from User import User, is_password_valid
+
 
 "configuration"
 
 # --- Configuration ---
-_script_dir = os.path.dirname(os.path.abspath(__file__))
-CSV_FILE = os.path.join(_script_dir, "users.csv")  # Path to user data CSV
-SIGNUP_PAGE = os.path.join(_script_dir, "signup.py")  # Path to signup page
-
-# tkinter variable placeholders (will be initialized after `Tk()` exists)
-
-# Tkinter variable placeholders (initialized after Tk() exists)
-username_entry = None
-password_entry = None
-error_text = None
-error_label = None
-error_fg = "red"
+_csv_dir = os.path.dirname(os.path.abspath(__file__))
+CSV_FILE = os.path.join(_csv_dir, "users.csv")  # Path to user data CSV
+SIGNUP_PAGE = os.path.join(_csv_dir, "signup.py")  # Path to signup page
 
 
-"utility functions"
+"repository and utility classes"
 
 # -------------------------------------------------------------
-# User data loading and search utilities
+# User data repository with binary search utilities
 # -------------------------------------------------------------
-def load_user_records():
-    """
-    Load user records from CSV and return a list of (username, password) tuples sorted by username.
-    If the CSV does not exist, return an empty list.
-    Sorting is case-insensitive for consistent binary search.
-    """
-    if not os.path.exists(CSV_FILE): # If the CSV file does not exist, return an empty list
-        return []
-    with open(CSV_FILE, newline="") as file: # Open the CSV file for reading
-        reader = csv.DictReader(file)
-        records = [(row.get("username", ""), row.get("password", "")) for row in reader] # Read each row and create a list of (username, password) tuples, using empty strings as defaults if keys are missing
-    # Ensure sorted order by username (stable, case-insensitive)
-    records.sort(key=lambda t: t[0].lower()) # Sort the records by username in a case-insensitive manner to ensure binary search works correctly
-    return records
+class UserRepository:
+    """Handles loading and searching user records from CSV."""
+    
+    def __init__(self, csv_path):
+        """Initialize repository with path to CSV file."""
+        self.csv_path = csv_path
+    
+    def load_records(self):
+        """
+        Load user records from CSV and return a list of User objects sorted by username.
+        Returns an empty list if the CSV does not exist.
+        """
+        if not os.path.exists(self.csv_path):
+            return []
+        records = []
+        with open(self.csv_path, newline="") as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                user = User(
+                    username=row.get("username", ""),
+                    password=row.get("password", ""),
+                    name=row.get("name", ""),
+                    age=row.get("age", ""),
+                    email=row.get("email", ""),
+                    form=row.get("form", ""),
+                    subjects=row.get("subjects", ""),
+                )
+                records.append(user)
+        records.sort(key=lambda u: u.username.lower())
+        return records
+    
+    @staticmethod
+    def binary_search_usernames(usernames, target):
+        """
+        Perform binary search on sorted list of usernames to find target username.
+        Returns the index of target in usernames, or -1 when not found.
+        Binary search is O(log n) and requires sorted input.
+        Comparison is case-insensitive.
+        """
+        lo = 0
+        hi = len(usernames) - 1
+        target_l = target.lower()
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            mid_val = usernames[mid].lower()
+            if mid_val == target_l:
+                return mid
+            elif mid_val < target_l:
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        return -1
+    
+    def find_user_index(self, username):
+        """
+        Return index of username in CSV (using binary search) or -1 if not found.
+        """
+        records = self.load_records()
+        usernames = [u.username for u in records]
+        return self.binary_search_usernames(usernames, username)
+    
+    def find_user(self, username):
+        """Find and return a User object by username, or None if not found."""
+        idx = self.find_user_index(username)
+        if idx == -1:
+            return None
+        records = self.load_records()
+        return records[idx]
 
 
 
-def binary_search_usernames(usernames, target): # This function performs a binary search on a sorted list of usernames to find the index of the target username. It compares usernames in a case-insensitive manner to ensure that the search is not affected by letter case. If the target username is found, it returns its index; otherwise, it returns -1 to indicate that the username was not found in the list.
-    """
-    Perform binary search on sorted list of usernames to find target username.
-    Returns the index of target in usernames, or -1 when not found.
-    Binary search is O(log n) and requires sorted input.
-    """
-    lo = 0
-    hi = len(usernames) - 1
-    target_l = target.lower()
-    while lo <= hi:
-        mid = (lo + hi) // 2
-        mid_val = usernames[mid].lower()  # Compare in lowercase for case-insensitive search
-        if mid_val == target_l:
-            return mid
-        elif mid_val < target_l:
-            lo = mid + 1
+# -------------------------------------------------------------
+# Window classes for login UI
+# -------------------------------------------------------------
+class PasswordChangeWindow(Toplevel):
+    """Dialog window for changing a user's password."""
+    
+    def __init__(self, parent, user: User):
+        """
+        Initialize the password change dialog.
+        
+        Args:
+            parent: The parent tkinter window
+            user: The User object whose password will be changed
+        """
+        super().__init__(parent)
+        self.user = user
+        self.title("Change Password")
+        self.geometry("320x200")
+        
+        # New password label and entry
+        Label(self, text="New password:").pack()
+        self.new_var = StringVar()
+        Entry(self, textvariable=self.new_var, show="*").pack()
+        
+        # Confirm password label and entry
+        Label(self, text="Confirm password:").pack()
+        self.confirm_var = StringVar()
+        Entry(self, textvariable=self.confirm_var, show="*").pack()
+        
+        # Message label for feedback
+        self.msg = StringVar()
+        Label(self, textvariable=self.msg, fg="red").pack(pady=5)
+        
+        # Submit button
+        Button(self, text="Submit", command=self.submit).pack(pady=5)
+    
+    def submit(self):
+        """Handle password change submission and validation."""
+        new = self.new_var.get().strip()
+        conf = self.confirm_var.get().strip()
+        
+        # Check if passwords match
+        if new != conf:
+            self.msg.set("Passwords do not match")
+            return
+        
+        # Validate password
+        err = is_password_valid(self.user.username, new)
+        if err:
+            self.msg.set(err)
+            return
+        
+        # Update password in CSV
+        self.user.change_password(new, CSV_FILE)
+        self.msg.set("Password updated")
+
+
+class SuccessWindow(Toplevel):
+    """Dialog window displayed after successful login."""
+    
+    def __init__(self, parent, user: User):
+        """
+        Initialize the success window with user data.
+        
+        Args:
+            parent: The parent tkinter window
+            user: The User object whose data will be displayed
+        """
+        super().__init__(parent)
+        self.user = user
+        self.title("User Data")
+        self.geometry("400x300")
+        
+        Label(self, text="Login Successful", font=("Arial", 14)).pack(pady=5)
+        Label(self, text=user.display_data(), justify=LEFT).pack(pady=10)
+        Button(self, text="Change Password", command=self._open_password_change).pack(pady=5)
+        Button(self, text="OK", command=self.destroy).pack(pady=5)
+    
+    def _open_password_change(self):
+        """Open the password change dialog."""
+        PasswordChangeWindow(self, self.user)
+
+
+class LoginWindow(Tk):
+    """Main login window with binary search authentication."""
+    
+    def __init__(self, csv_file=CSV_FILE, signup_page=SIGNUP_PAGE):
+        """
+        Initialize the login window.
+        
+        Args:
+            csv_file: Path to the users CSV file
+            signup_page: Path to the signup.py script
+        """
+        super().__init__()
+        self.csv_file = csv_file
+        self.signup_page = signup_page
+        self.repository = UserRepository(csv_file)
+        
+        self.title("Login Page")
+        self.geometry("400x220")
+        
+        # Create tkinter variables
+        self.username_entry = StringVar()
+        self.password_entry = StringVar()
+        self.error_text = StringVar()
+        
+        self._build_ui()
+    
+    def _build_ui(self):
+        """Construct the login UI."""
+        Label(self, text="Username:").pack()
+        Entry(self, textvariable=self.username_entry).pack()
+        
+        Label(self, text="Password:").pack()
+        Entry(self, textvariable=self.password_entry, show="*").pack()
+        
+        Button(self, text="Log In", command=self.login).pack(pady=8)
+        Button(self, text="Sign Up", command=self.open_signup).pack()
+        
+        # Error message label
+        self.error_label = Label(self, textvariable=self.error_text, fg="red")
+        self.error_label.pack(pady=8)
+    
+    def login(self):
+        """Handle the login process when the user clicks the login button."""
+        self.error_text.set("")
+        self.error_label.config(fg="red")
+        
+        username = self.username_entry.get().strip()
+        password = self.password_entry.get().strip()
+        
+        if not username or not password:
+            self.error_text.set("Please enter both username and password")
+            return
+        
+        user = self.repository.find_user(username)
+        if user is None:
+            self.error_text.set("Username not found")
+            return
+        
+        if password == user.password:
+            self.error_text.set("")
+            self.error_label.config(fg="green")
+            SuccessWindow(self, user)
         else:
-            hi = mid - 1
-    return -1
-# assumes usernames are sorted in a case-insensitive manner for correct binary search functionality
+            self.error_text.set("Incorrect password")
+    
+    def open_signup(self):
+        """Launch the signup page in a new Python process."""
+        subprocess.Popen([sys.executable, self.signup_page])
 
 
-def find_user_index(username):
-    """
-    Return index of username in CSV (using binary search) or -1 if not found.
-    Loads sorted records, extracts usernames, and searches.
-    """
-    records = load_user_records()
-    usernames = [u for (u, p) in records]
-    return binary_search_usernames(usernames, username)
-
-
-
-def open_success_window(username):
-    """
-    Open a new window to show login success message with the username.
-    """
-    success_window = Toplevel(app)
-    success_window.title("Login Successful")
-    success_window.geometry("320x120")
-    Label(success_window, text=f"Welcome, {username}!", font=("Arial", 14)).pack(expand=True)
-    Button(success_window, text="OK", command=success_window.destroy).pack(pady=10)
-
-
-
-def open_signup():
-    """
-    Launch the signup page in a new Python process.
-    """
-    subprocess.Popen([sys.executable, SIGNUP_PAGE])
-
-
-
-# -------------------------------------------------------------
-# GUI login handler
-# -------------------------------------------------------------
-def login():
-    """
-    Handle the login process when the user clicks the login button.
-    Uses binary search to check username existence and validates password.
-    Provides meaningful error messages for empty fields, username not found, and incorrect password.
-    """
-    error_text.set("")  # Clear previous error messages
-    if error_label:
-        error_label.config(fg=error_fg)
-
-    username = username_entry.get().strip()
-    password = password_entry.get().strip()
-
-    # Error: empty input fields
-    if not username or not password:
-        error_text.set("Please enter both username and password")
-        if error_label:
-            error_label.config(fg="red")
-        return
-
-    # Use binary search to find username quickly in the sorted records
-    idx = find_user_index(username)
-    if idx == -1:
-        error_text.set("Username not found")
-        if error_label:
-            error_label.config(fg="red")
-        return
-
-    # Load password for found user and validate
-    records = load_user_records()
-    found_username, found_password = records[idx] # Get the username and password from the records using the index found by binary search
-    if password == found_password:
-        error_text.set("")
-        if error_label: # Set error label color to green on successful login
-            error_label.config(fg="green")
-        open_success_window(username)
-    else: # Password does not match
-        error_text.set("Incorrect password")
-        if error_label:
-            error_label.config(fg="red")
-
-
-
-# -------------------------------------------------------------
-# Main program app interface (Tkinter GUI setup)
-# -------------------------------------------------------------
-app = Tk()
-app.title("Login Page")
-app.geometry("400x220")
-
-# Create tkinter variables AFTER the main Tk root exists
-username_entry = StringVar()
-password_entry = StringVar()
-error_fg = "red"
-
-# Build the UI
-Label(app, text="Username:").pack()
-Entry(app, textvariable=username_entry).pack()
-# The password entry field uses the `show="*"` option to mask the input, providing a more secure way for users to enter their passwords without displaying them on the screen.
-Label(app, text="Password:").pack()
-Entry(app, textvariable=password_entry, show="*").pack()
-
-Button(app, text="Log In", command=login).pack(pady=8) # Login button triggers the login function when clicked
-Button(app, text="Sign Up", command=open_signup).pack() # Sign Up button opens the signup page when clicked
-
-# Error message label
-error_text = StringVar()
-error_label = Label(app, textvariable=error_text, fg=error_fg)
-error_label.pack(pady=8)
-
-# Start the GUI event loop
-app.mainloop()
+if __name__ == "__main__":
+    app = LoginWindow()
+    app.mainloop()
